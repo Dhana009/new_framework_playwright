@@ -1,19 +1,15 @@
 class AuthCache:
-    """
-    Caches Playwright storage_state per user.
-    Login happens once per user.
-    """
-
     def __init__(self, login_func):
         self._login_func = login_func
         self._cache = {}
 
     def exists(self, user: dict) -> bool:
-        return user["id"] in self._cache
+        return user["email"] in self._cache
 
-    def login_and_store(self, browser, user: dict):
-        storage_state = self._login_func(browser, user)
-        self._cache[user["id"]] = storage_state
+    def get(self, user: dict) -> str:
+        return self._cache[user["email"]]
 
-    def get(self, user: dict):
-        return self._cache[user["id"]]
+    def login_and_store(self, user: dict) -> str:
+        token = self._login_func(user)
+        self._cache[user["email"]] = token
+        return token

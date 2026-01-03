@@ -1,13 +1,10 @@
 import requests
+import os
 
 
 class APIClient:
-    """
-    Stateless API client for seed operations.
-    """
-
-    def __init__(self, base_url: str, token: str):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, token: str):
+        self.base_url = os.environ["BACKEND_BASE_URL"]
         self.headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
