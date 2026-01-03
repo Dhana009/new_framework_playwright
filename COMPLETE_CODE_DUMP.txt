@@ -1,0 +1,1189 @@
+================================================================================
+COMPLETE CODEBASE DUMP
+Repository: d:\new_framework_playwright
+Commit: 6aca2b2 (refactored)
+================================================================================
+
+================================================================================
+FILE: .gitignore
+================================================================================
+/.env
+
+================================================================================
+FILE: pytest.ini
+================================================================================
+[pytest]
+markers =
+    admin: tests that require ADMIN role
+    editor: tests that require EDITOR role
+    viewer: tests that require VIEWER role
+
+================================================================================
+FILE: key decisions.md
+================================================================================
+Perfect pause. This is **exactly** what senior engineers do before they refactor or implement further.
+Let's **freeze the design**, list **every critical decision**, and make sure nothing is ambiguous.
+No code. No theory drift. Just **clear architectural decisions**.
+
+I'll structure this like a **framework design review**.
+
+---
+
+## 1. What is the framework we are building? (Anchor)
+
+**What is it?**
+A **parallel, role-aware, Playwright (Python) web automation framework** that supports:
+
+* Multiple user roles (Admin / Editor / Viewer)
+* Parallel execution with limited user resources
+* Login reuse (no login per test)
+* Business-driven seed data
+* Role-aware seed data visibility
+
+This anchor matters because **every decision flows from this**.
+
+---
+
+## 2. Core execution model (CRITICAL DECISION #1)
+
+### Decision
+
+**Tests drive execution requirements, not workers.**
+
+### Meaning
+
+* Workers are just execution slots
+* Tests declare what they need (role, data)
+* Framework reacts dynamically
+
+### Why this is critical
+
+* Solves parallel execution cleanly
+* Avoids hardcoding worker → user mapping
+* Scales as test mix changes
+
+✅ **LOCKED**
+
+---
+
+## 3. User & role management (CRITICAL DECISION #2)
+
+### Decision
+
+**Users are finite resources managed via role-based pools.**
+
+### Structure
+
+* Admin pool
+* Editor pool
+* Viewer pool
+
+### Behavior
+
+* Tests request a role
+* Framework leases a user from that role pool
+* If no user available → fail fast
+
+### Why this is critical
+
+* Makes resource limits explicit
+* Prevents silent permission bugs
+* Matches real production constraints
+
+✅ **LOCKED**
+
+---
+
+## 4. Login strategy (CRITICAL DECISION #3)
+
+### Decision
+
+**Login is cached per user, not per test and not per worker.**
+
+### Meaning
+
+* First time a user is used → login happens
+* Auth state (cookies / tokens) is cached
+* Subsequent tests reuse auth
+* Max logins = number of users, not tests
+
+### Why this is critical
+
+* Prevents 100 tests = 100 logins
+* Keeps tests fast
+* Works with dynamic role allocation
+
+### Key clarification
+
+* User lease ends after test
+* Auth state survives
+
+✅ **LOCKED**
+
+---
+
+## 5. Lazy behavior everywhere (CRITICAL DECISION #4)
+
+### Decision
+
+**Everything is lazy unless proven otherwise.**
+
+Lazy means:
+
+* Users are leased only when a test starts
+* Login happens only when auth is missing
+* Seed data is created only when absent
+
+### Why this is critical
+
+* Avoids unnecessary setup
+* Keeps framework fast
+* Makes execution deterministic
+
+✅ **LOCKED**
+
+---
+
+## 6. Seed data philosophy (CRITICAL DECISION #5)
+
+### Decision
+
+**Seed data is business-driven, not schema-driven.**
+
+### Meaning
+
+* Seed data exists to enable business flows
+* Derived from UI behavior:
+
+  * search
+  * filter
+  * sort
+  * pagination
+* Not from "complete backend schema coverage"
+
+### Why this is critical
+
+* Prevents overengineering
+* Keeps seed data minimal
+* Aligns UI automation with intent
+
+✅ **LOCKED**
+
+---
+
+## 7. Seed builders (CRITICAL DECISION #6)
+
+### Decision
+
+**Use type-specific seed builders with a shared base.**
+
+### Structure
+
+* Base item builder (common fields)
+* PHYSICAL builder
+* DIGITAL builder
+* SERVICE builder
+* Optional fields via overrides
+
+### Why this is critical
+
+* Handles conditional schema cleanly
+* Keeps payloads valid
+* Avoids giant factories
+
+### Important constraint
+
+* Builders create payloads only
+* They do NOT decide counts or scope
+
+✅ **LOCKED**
+
+---
+
+## 8. Seed data scope (CRITICAL DECISION #7)
+
+### Decision
+
+**Seed data is scoped by role visibility, not by test or user identity.**
+
+### Breakdown
+
+* **Admin seed data**
+
+  * Created once
+  * Global visibility
+  * Used by Admin + Viewer tests
+
+* **Editor seed data**
+
+  * Created lazily
+  * Scoped per editor user
+  * Used only by that editor's tests
+
+* **Viewer**
+
+  * Never creates seed data
+  * Only consumes
+
+### Why this is critical
+
+* Respects permission rules
+* Avoids invalid test setups
+* Keeps data realistic
+
+✅ **LOCKED**
+
+---
+
+## 9. Flow 3 seed data strategy (CRITICAL DECISION #8)
+
+### Decision
+
+**Flow 3 uses a shared, read-only baseline dataset.**
+
+### Details
+
+* 31 records
+* Supports:
+
+  * table display
+  * search
+  * filters
+  * sorting
+  * pagination
+* Data is reused across all Flow 3 tests
+* Tests must NOT mutate it
+
+### Why this is critical
+
+* One dataset → many tests
+* Stable and deterministic
+* Fast execution
+
+✅ **LOCKED**
+
+---
+
+## 10. Editor-specific seed data (CRITICAL DECISION #9)
+
+### Decision
+
+**Editor seed data is created lazily per editor, when first needed.**
+
+### Meaning
+
+* We do NOT pre-create editor data
+* We do NOT care which editor runs first
+* Whichever editor is leased:
+
+  * Ensure editor-owned seed data exists
+  * Create if missing
+  * Reuse later
+
+### Why this is critical
+
+* Works with parallelism
+* No prediction required
+* Correct permission modeling
+
+✅ **LOCKED**
+
+---
+
+## 11. Test responsibilities (CRITICAL DECISION #10)
+
+### Decision
+
+**Tests declare intent, never mechanics.**
+
+Tests do:
+
+* Declare required role
+* Declare required flow
+
+Tests do NOT:
+
+* Login
+* Create users
+* Create seed data
+* Handle permissions
+
+### Why this is critical
+
+* Clean test code
+* Framework owns complexity
+* Easy to reason about failures
+
+✅ **LOCKED**
+
+---
+
+## 12. Failure philosophy (CRITICAL DECISION #11)
+
+### Decision
+
+**Fail fast on resource shortages or invalid state.**
+
+Examples:
+
+* Not enough admins → fail
+* Editor cannot see required data → fail
+* Auth invalid → re-login once, then fail
+
+### Why this is critical
+
+* No silent false positives
+* Easier debugging
+* CI stability
+
+✅ **LOCKED**
+
+---
+
+## 13. What is NOT decided yet (intentionally)
+
+This is important — these are **implementation details**, not design gaps:
+
+* Exact fixture names
+* File/folder refactoring
+* How auth state is serialized
+* Whether login is API or UI
+* How reset flags are passed
+
+These can change **without changing architecture**.
+
+---
+
+## 14. Final sanity check: are we changing anything fundamental?
+
+### Answer: ❌ No
+
+All decisions so far are:
+
+* Correct
+* Standard
+* Scalable
+* Interview-safe
+* Production-realistic
+
+Any refactoring you do next will be **structural**, not conceptual.
+
+---
+
+## 15. What we do next (controlled refactoring plan)
+
+Now that decisions are frozen, the **only correct next step** is:
+
+1. Refactor code to **match these decisions**
+2. Align:
+
+   * conftest
+   * seed logic
+   * user leasing
+   * auth caching
+
+One layer at a time.
+
+---
+
+### When you're ready, say:
+
+**"Let's refactor starting with user pool and auth cache."**
+
+We'll refactor calmly, without breaking anything, one decision at a time.
+
+================================================================================
+FILE: api/api_client.py
+================================================================================
+import requests
+
+
+class APIClient:
+    """
+    Stateless API client for backend operations (seed data).
+
+    Responsibilities:
+    - Attach Authorization: Bearer <token>
+    - Perform GET / POST requests
+    - No internal auth mutation
+    - Safe for session-level reuse
+    """
+
+    def __init__(self, backend_base_url: str, access_token: str):
+        self.base_url = backend_base_url.rstrip("/")
+        self.headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+
+    def get(self, path: str):
+        """
+        Perform GET request.
+
+        Example:
+        client.get("/items")
+        """
+        return requests.get(
+            f"{self.base_url}{path}",
+            headers=self.headers,
+        )
+
+    def post(self, path: str, json: dict):
+        """
+        Perform POST request.
+
+        Example:
+        client.post("/items", json=payload)
+        """
+        return requests.post(
+            f"{self.base_url}{path}",
+            json=json,
+            headers=self.headers,
+        )
+
+================================================================================
+FILE: api/__init__.py
+================================================================================
+(File does not exist - empty or not created)
+
+================================================================================
+FILE: auth/api_login.py
+================================================================================
+import requests
+import os
+
+
+def api_login(user: dict) -> str:
+    response = requests.post(
+        f"{os.environ['BACKEND_BASE_URL']}/auth/login",
+        json={
+            "email": user["email"],
+            "password": user["password"]
+        },
+        timeout=10
+    )
+
+    response.raise_for_status()
+    return response.json()["access_token"]
+
+================================================================================
+FILE: auth/auth_cache.py
+================================================================================
+class AuthCache:
+    """
+    Caches Playwright storage_state per user.
+
+    Purpose:
+    - Avoid repeated UI login
+    - Login once per user
+    - Reuse auth across tests and workers
+
+    Scope:
+    - Session-level (via fixture)
+    """
+
+    def __init__(self, login_func):
+        """
+        login_func: function that performs UI login
+        and returns Playwright storage_state (dict)
+        """
+        self._login_func = login_func
+        self._cache = {}
+
+    def exists(self, user: dict) -> bool:
+        """
+        Check if auth state exists for user.
+        """
+        return user["id"] in self._cache
+
+    def login_and_store(self, user: dict):
+        """
+        Perform UI login and store storage_state.
+        """
+        storage_state = self._login_func(user)
+        self._cache[user["id"]] = storage_state
+
+    def get(self, user: dict):
+        """
+        Retrieve cached storage_state for user.
+        """
+        return self._cache[user["id"]]
+
+================================================================================
+FILE: auth/login.py
+================================================================================
+from playwright.sync_api import Page
+
+
+def api_login(user: dict) -> dict:
+    """
+    Perform UI login using Playwright and return storage_state.
+
+    Input:
+    - user: dict with credentials (email, password)
+
+    Output:
+    - Playwright storage_state (dict)
+
+    Notes:
+    - Used only for UI authentication
+    - No API tokens involved
+    - Called once per user and cached
+    """
+
+    # NOTE:
+    # The Page object is created internally by Playwright
+    # via a temporary browser context for login only.
+
+    from playwright.sync_api import sync_playwright
+    import os
+
+    FRONTEND_BASE_URL = os.environ["FRONTEND_BASE_URL"]
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
+
+        # Navigate to login page
+        page.goto(FRONTEND_BASE_URL)
+
+        # --- LOGIN FLOW (adjust selectors to your app) ---
+        page.fill("input[name='email']", user["email"])
+        page.fill("input[name='password']", user["password"])
+        page.click("button[type='submit']")
+
+        # Wait until login completes (dashboard or any post-login element)
+        page.wait_for_load_state("networkidle")
+
+        # Capture storage state
+        storage_state = context.storage_state()
+
+        browser.close()
+
+    return storage_state
+
+================================================================================
+FILE: auth/__init__.py
+================================================================================
+(File does not exist - empty or not created)
+
+================================================================================
+FILE: config/users/user_pool_manager.py
+================================================================================
+import threading
+from config.users.user_pools import ADMIN_USERS, EDITOR_USERS, VIEWER_USERS
+
+
+class UserPoolManager:
+    """
+    Thread-safe role-based user leasing.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._leased = set()
+
+        self._pools = {
+            "ADMIN": ADMIN_USERS,
+            "EDITOR": EDITOR_USERS,
+            "VIEWER": VIEWER_USERS,
+        }
+
+    def acquire(self, role: str) -> dict:
+        with self._lock:
+            for user in self._pools[role]:
+                user_key = f"{role}:{user['email']}"
+                if user_key not in self._leased:
+                    self._leased.add(user_key)
+                    user["id"] = user["email"]  # stable identifier
+                    return user
+
+            raise RuntimeError(f"No available users for role {role}")
+
+    def release(self, user: dict):
+        with self._lock:
+            user_key = f"{user['role']}:{user['email']}"
+            self._leased.discard(user_key)
+
+================================================================================
+FILE: config/users/user_pools.py
+================================================================================
+import os
+
+
+def _load_users(role: str) -> list[dict]:
+    """
+    Load users for a role from ENV.
+    Pattern: ROLE_1_EMAIL / ROLE_1_PASSWORD
+    """
+    users = []
+    index = 1
+
+    while True:
+        email = os.environ.get(f"{role}_{index}_EMAIL")
+        password = os.environ.get(f"{role}_{index}_PASSWORD")
+
+        if not email or not password:
+            break
+
+        users.append({
+            "email": email,
+            "password": password,
+            "role": role
+        })
+
+        index += 1
+
+    if not users:
+        raise RuntimeError(f"No users found for role {role}")
+
+    return users
+
+
+ADMIN_USERS = _load_users("ADMIN")
+EDITOR_USERS = _load_users("EDITOR")
+VIEWER_USERS = _load_users("VIEWER")
+
+================================================================================
+FILE: config/users/__init__.py
+================================================================================
+(File does not exist - empty or not created)
+
+================================================================================
+FILE: config/__init__.py
+================================================================================
+(File does not exist - empty or not created)
+
+================================================================================
+FILE: db/mongo_client.py
+================================================================================
+import os
+from pymongo import MongoClient
+
+
+class MongoSeedCleaner:
+    """
+    MongoDB utility for cleaning seed data.
+
+    Responsibilities:
+    - Connect to MongoDB using MONGODB_URI
+    - Hard-delete seed data ONLY
+    - No business logic
+    - No test orchestration logic
+    """
+
+    def __init__(self):
+        mongo_uri = os.environ.get("MONGODB_URI")
+        if not mongo_uri:
+            raise RuntimeError("MONGODB_URI is not set")
+
+        self.client = MongoClient(mongo_uri)
+
+        # Database name is derived from the URI (flowhub / flowhub-test)
+        self.db = self.client.get_default_database()
+
+        # Confirmed collection name
+        self.items = self.db["items"]
+
+    def delete_all_seed_items(self):
+        """
+        Delete all seed-tagged items (global reset).
+        """
+        self.items.delete_many({
+            "tags": {"$in": ["seed"]}
+        })
+
+    def delete_editor_seed_items(self, editor_id):
+        """
+        Delete seed-tagged items created by a specific editor.
+        """
+        self.items.delete_many({
+            "tags": {"$in": ["seed"]},
+            "created_by": editor_id
+        })
+
+================================================================================
+FILE: db/__init__.py
+================================================================================
+(File does not exist - empty or not created)
+
+================================================================================
+FILE: seed/admin_seed.py
+================================================================================
+import os
+from db.mongo_client import MongoSeedCleaner
+
+
+class AdminSeed:
+    """
+    Ensures global seed data exists.
+
+    Characteristics:
+    - Created using ADMIN privileges
+    - Created once per test session
+    - Can be force-reset via SEED_RESET flag
+    """
+
+    REQUIRED_COUNT = 31  # Flow 3 requirement
+
+    def __init__(self, api_client):
+        self.api_client = api_client
+        self._seeded = False
+
+        # NEW (guarded flag)
+        self._seed_reset = os.environ.get("SEED_RESET", "false").lower() == "true"
+
+        # Mongo cleaner is only used when reset is enabled
+        self._mongo_cleaner = MongoSeedCleaner() if self._seed_reset else None
+
+    def ensure(self):
+        """
+        Ensure global seed exists.
+        """
+
+        # -------- NEW LOGIC (EXPLICIT + GUARDED) --------
+        if self._seed_reset:
+            self._reset_and_reseed()
+            self._seeded = True
+            return
+        # ------------------------------------------------
+
+        # -------- EXISTING LOGIC (UNCHANGED) --------
+        if self._seeded:
+            return
+
+        if self._seed_exists():
+            self._seeded = True
+            return
+
+        self._create_seed()
+        self._seeded = True
+        # --------------------------------------------
+
+    def _seed_exists(self) -> bool:
+        """
+        Check if sufficient seed items exist.
+        """
+        response = self.api_client.get("/items?limit=1")
+        response.raise_for_status()
+
+        data = response.json()
+        return data["pagination"]["total"] >= self.REQUIRED_COUNT
+
+    def _create_seed(self):
+        """
+        Create global seed items.
+        """
+        from utils.seed_builders import build_flow3_items
+
+        payloads = build_flow3_items()
+
+        for payload in payloads:
+            self.api_client.post("/items", json=payload)
+
+    # -------- NEW METHODS (ISOLATED) --------
+    def _reset_and_reseed(self):
+        """
+        Force reset seed data and recreate it.
+        """
+        self._mongo_cleaner.delete_all_seed_items()
+        self._create_seed()
+
+================================================================================
+FILE: seed/editor_seed.py
+================================================================================
+import os
+from db.mongo_client import MongoSeedCleaner
+from auth.api_login import api_login
+from api.api_client import APIClient
+
+
+class EditorSeed:
+    """
+    Ensures editor-specific seed data exists.
+
+    Characteristics:
+    - Created only for EDITOR role
+    - Created lazily (only if missing)
+    - Scoped per editor (created_by)
+    - Can be force-reset via SEED_RESET flag
+    """
+
+    REQUIRED_COUNT = 5  # Enough for editor-specific tests
+
+    def __init__(self):
+        self._seeded_editors = set()
+
+        # NEW (guarded flag)
+        self._seed_reset = os.environ.get("SEED_RESET", "false").lower() == "true"
+
+        # Mongo cleaner used only when reset is enabled
+        self._mongo_cleaner = MongoSeedCleaner() if self._seed_reset else None
+
+    def ensure(self, editor_user: dict):
+        """
+        Ensure seed exists for a specific editor.
+        """
+        editor_id = editor_user["id"]
+
+        # -------- NEW LOGIC (EXPLICIT + GUARDED) --------
+        if self._seed_reset:
+            self._reset_and_reseed(editor_user)
+            self._seeded_editors.add(editor_id)
+            return
+        # ------------------------------------------------
+
+        # -------- EXISTING LOGIC (UNCHANGED) --------
+        if editor_id in self._seeded_editors:
+            return
+
+        if self._seed_exists(editor_user):
+            self._seeded_editors.add(editor_id)
+            return
+
+        self._create_seed(editor_user)
+        self._seeded_editors.add(editor_id)
+        # --------------------------------------------
+
+    def _seed_exists(self, editor_user: dict) -> bool:
+        """
+        Check if editor has sufficient seed items.
+        """
+        api_client = self._get_editor_api_client(editor_user)
+
+        response = api_client.get(
+            f"/items?created_by={editor_user['id']}&limit=1"
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        return data["pagination"]["total"] >= self.REQUIRED_COUNT
+
+    def _create_seed(self, editor_user: dict):
+        """
+        Create editor-owned seed items using EDITOR API login.
+        """
+        api_client = self._get_editor_api_client(editor_user)
+
+        from utils.seed_builders import build_flow3_items
+        payloads = build_flow3_items(created_by=editor_user["id"])
+
+        for payload in payloads:
+            api_client.post("/items", json=payload)
+
+    # -------- NEW METHODS (ISOLATED) --------
+    def _reset_and_reseed(self, editor_user: dict):
+        """
+        Force reset editor seed data and recreate it.
+        """
+        self._mongo_cleaner.delete_editor_seed_items(editor_user["id"])
+        self._create_seed(editor_user)
+
+    def _get_editor_api_client(self, editor_user: dict) -> APIClient:
+        """
+        Lazily create an API client authenticated as the editor.
+        """
+        token = api_login(editor_user)
+        return APIClient(token)
+
+================================================================================
+FILE: seed/seed_manager.py
+================================================================================
+from seed.admin_seed import AdminSeed
+from seed.editor_seed import EditorSeed
+
+
+class SeedManager:
+    """
+    Orchestrates role-aware seed enforcement.
+
+    Responsibilities:
+    - Ensure global admin seed exists once
+    - Ensure editor-specific seed exists lazily
+    - Skip seed creation for viewer
+    """
+
+    def __init__(self, api_client):
+        self._admin_seed = AdminSeed(api_client)
+        self._editor_seed = EditorSeed(api_client)
+
+    def ensure_seed(self, role: str, user: dict):
+        """
+        Ensure required seed data exists before test execution.
+        """
+        if role == "ADMIN":
+            self._admin_seed.ensure()
+
+        elif role == "EDITOR":
+            self._admin_seed.ensure()
+            self._editor_seed.ensure(user)
+
+        elif role == "VIEWER":
+            # Viewer cannot create data
+            # Assumes admin seed already exists
+            self._admin_seed.ensure()
+
+        else:
+            raise ValueError(f"Unknown role: {role}")
+
+================================================================================
+FILE: seed/__init__.py
+================================================================================
+(File does not exist - empty or not created)
+
+================================================================================
+FILE: tests/conftest.py
+================================================================================
+"""
+Pytest configuration file - contains shared fixtures for all tests.
+Acts as the control plane for:
+- role resolution
+- user leasing
+- auth reuse (UI)
+- seed enforcement (API)
+- browser context creation
+"""
+
+import os
+import pytest
+from dotenv import load_dotenv
+
+from config.users.user_pool_manager import UserPoolManager
+from auth.auth_cache import AuthCache
+from auth.login import api_login              # UI / Playwright login
+from auth.api_login import admin_api_login    # API login for seed
+from api.api_client import APIClient
+from seed.seed_manager import SeedManager
+
+# ------------------------------------------------------------------
+# Environment loading (LOCAL: .env | CI: injected env vars)
+# ------------------------------------------------------------------
+
+load_dotenv()
+
+# ------------------------------------------------------------------
+# Role resolution
+# ------------------------------------------------------------------
+
+@pytest.fixture
+def test_role(request):
+    """
+    Resolve role required by the test via markers.
+    Default role: ADMIN
+    """
+    if request.node.get_closest_marker("admin"):
+        return "ADMIN"
+
+    if request.node.get_closest_marker("editor"):
+        return "EDITOR"
+
+    if request.node.get_closest_marker("viewer"):
+        return "VIEWER"
+
+    return "ADMIN"
+
+
+# ------------------------------------------------------------------
+# Session-level infrastructure
+# ------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def user_pool():
+    """
+    Manages role-based user leasing (ADMIN / EDITOR / VIEWER).
+    """
+    return UserPoolManager()
+
+
+@pytest.fixture(scope="session")
+def auth_cache():
+    """
+    Caches Playwright authentication state per user.
+    UI login happens once per user.
+    """
+    return AuthCache(login_func=api_login)
+
+
+@pytest.fixture(scope="session")
+def api_client():
+    """
+    Stateless API client for seed operations.
+    Authenticated using ADMIN JWT token.
+    """
+    backend_url = os.environ["BACKEND_BASE_URL"]
+    admin_email = os.environ["ADMIN_EMAIL"]
+    admin_password = os.environ["ADMIN_PASSWORD"]
+
+    access_token = admin_api_login(
+        backend_base_url=backend_url,
+        email=admin_email,
+        password=admin_password,
+    )
+
+    return APIClient(
+        backend_base_url=backend_url,
+        access_token=access_token,
+    )
+
+
+@pytest.fixture(scope="session")
+def seed_manager(api_client):
+    """
+    Orchestrates role-aware seed enforcement.
+    """
+    return SeedManager(api_client)
+
+
+# ------------------------------------------------------------------
+# Per-test orchestration
+# ------------------------------------------------------------------
+
+@pytest.fixture
+def leased_user(test_role, user_pool):
+    """
+    Lease a user based on role for the duration of the test.
+    """
+    user = user_pool.acquire(test_role)
+    yield user
+    user_pool.release(user)
+
+
+@pytest.fixture
+def auth_state(leased_user, auth_cache):
+    """
+    Ensure Playwright authentication exists for the leased user.
+    Login only happens if auth is missing.
+    """
+    if not auth_cache.exists(leased_user):
+        auth_cache.login_and_store(leased_user)
+
+    return auth_cache.get(leased_user)
+
+
+@pytest.fixture(autouse=True)
+def seed_guard(test_role, leased_user, seed_manager):
+    """
+    Ensure required seed data exists before each test.
+    """
+    seed_manager.ensure_seed(
+        role=test_role,
+        user=leased_user,
+    )
+
+
+# ------------------------------------------------------------------
+# Browser context & page
+# ------------------------------------------------------------------
+
+@pytest.fixture
+def page(browser, auth_state):
+    """
+    Create an authenticated browser context and page.
+    """
+    context = browser.new_context(storage_state=auth_state)
+    page = context.new_page()
+    yield page
+    context.close()
+
+================================================================================
+FILE: tests/__init__.py
+================================================================================
+(File does not exist - empty or not created)
+
+================================================================================
+FILE: utils/seed_builders.py
+================================================================================
+import random
+import uuid
+from datetime import datetime
+
+
+def build_flow3_items(created_by: str | None = None) -> list[dict]:
+    """
+    Build seed payloads for Flow 3.
+
+    Characteristics:
+    - Supports pagination, search, filter, sort
+    - Covers all item_type variants
+    - Can be reused for admin or editor seed
+    - Does NOT perform API calls
+
+    Args:
+        created_by: user id (optional)
+                    - None → admin/global seed
+                    - str  → editor-owned seed
+
+    Returns:
+        List of item payload dicts
+    """
+
+    items = []
+
+    item_types = ["PHYSICAL", "DIGITAL", "SERVICE"]
+    categories = ["Electronics", "Books", "Services", "Office"]
+
+    for index in range(31):  # Flow 3 requires 31+ items
+        item_type = random.choice(item_types)
+
+        base_item = {
+            "name": f"Item {index} {uuid.uuid4().hex[:6]}",
+            "description": f"Description for item {index}",
+            "item_type": item_type,
+            "price": round(random.uniform(10, 500), 2),
+            "category": random.choice(categories),
+            "normalizedCategory": "general",
+            "is_active": index % 2 == 0,
+            "version": 1,
+            "created_by": created_by,
+            "tags": ["seed", "flow3"],
+            "createdAt": datetime.utcnow().isoformat(),
+        }
+
+        # Conditional fields
+        if item_type == "PHYSICAL":
+            base_item.update({
+                "weight": round(random.uniform(0.5, 10), 2),
+                "dimensions": {
+                    "length": round(random.uniform(10, 100), 1),
+                    "width": round(random.uniform(10, 100), 1),
+                    "height": round(random.uniform(1, 50), 1),
+                },
+            })
+
+        elif item_type == "DIGITAL":
+            base_item.update({
+                "download_url": "https://example.com/download/file.zip",
+                "file_size": random.randint(1000, 5_000_000),
+            })
+
+        elif item_type == "SERVICE":
+            base_item.update({
+                "duration_hours": random.randint(1, 40),
+            })
+
+        # Optional fields (realistic but non-essential)
+        if index % 3 == 0:
+            base_item["embed_url"] = "https://example.com/embed/demo"
+
+        if index % 4 == 0:
+            base_item["file_path"] = f"uploads/items/{uuid.uuid4().hex}.pdf"
+            base_item["file_metadata"] = {
+                "original_name": "document.pdf",
+                "content_type": "application/pdf",
+                "size": random.randint(1000, 500_000),
+                "uploaded_at": datetime.utcnow().isoformat(),
+            }
+
+        items.append(base_item)
+
+    return items
+
+================================================================================
+FILE: utils/__init__.py
+================================================================================
+(File does not exist - empty or not created)
+
+================================================================================
+END OF CODEBASE DUMP
+================================================================================
