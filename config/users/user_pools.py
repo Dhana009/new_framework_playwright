@@ -1,59 +1,35 @@
-"""
-Role-based user pools.
+import os
 
-Each user entry must contain:
-- id        : unique identifier (string/int)
-- email     : login email
-- password  : login password
-- role      : ADMIN | EDITOR | VIEWER
 
-IMPORTANT:
-- These are TEST USERS only
-- Credentials should come from env vars or secrets in real setups
-- For now, structure correctness matters more than values
-"""
+def _load_users(role: str) -> list[dict]:
+    """
+    Load users for a role from ENV.
+    Pattern: ROLE_1_EMAIL / ROLE_1_PASSWORD
+    """
+    users = []
+    index = 1
 
-ADMIN_USERS = [
-    {
-        "id": "admin_1",
-        "email": "admin1@test.com",
-        "password": "Admin@123",
-        "role": "ADMIN",
-    },
-    {
-        "id": "admin_2",
-        "email": "admin2@test.com",
-        "password": "Admin@123",
-        "role": "ADMIN",
-    },
-]
+    while True:
+        email = os.environ.get(f"{role}_{index}_EMAIL")
+        password = os.environ.get(f"{role}_{index}_PASSWORD")
 
-EDITOR_USERS = [
-    {
-        "id": "editor_1",
-        "email": "editor1@test.com",
-        "password": "Editor@123",
-        "role": "EDITOR",
-    },
-    {
-        "id": "editor_2",
-        "email": "editor2@test.com",
-        "password": "Editor@123",
-        "role": "EDITOR",
-    },
-]
+        if not email or not password:
+            break
 
-VIEWER_USERS = [
-    {
-        "id": "viewer_1",
-        "email": "viewer1@test.com",
-        "password": "Viewer@123",
-        "role": "VIEWER",
-    },
-    {
-        "id": "viewer_2",
-        "email": "viewer2@test.com",
-        "password": "Viewer@123",
-        "role": "VIEWER",
-    },
-]
+        users.append({
+            "email": email,
+            "password": password,
+            "role": role
+        })
+
+        index += 1
+
+    if not users:
+        raise RuntimeError(f"No users found for role {role}")
+
+    return users
+
+
+ADMIN_USERS = _load_users("ADMIN")
+EDITOR_USERS = _load_users("EDITOR")
+VIEWER_USERS = _load_users("VIEWER")
