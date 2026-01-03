@@ -71,3 +71,27 @@ def auth_state(admin_user, auth_cache, browser):
         auth_cache.login_and_store(browser, admin_user)
 
     return auth_cache.get(admin_user)
+
+from auth.api_login import admin_api_login
+from api.api_client import APIClient
+from seed.seed_manager import SeedManager
+
+
+@pytest.fixture(scope="session")
+def api_client():
+    backend_url = os.environ["BACKEND_BASE_URL"]
+    token = admin_api_login()
+    return APIClient(backend_url, token)
+
+
+@pytest.fixture(scope="session")
+def seed_manager(api_client):
+    return SeedManager(api_client)
+
+
+@pytest.fixture(autouse=True)
+def seed_guard(seed_manager):
+    """
+    Phase 1: ensure admin seed exists before each test.
+    """
+    seed_manager.ensure_seed(role="ADMIN")
